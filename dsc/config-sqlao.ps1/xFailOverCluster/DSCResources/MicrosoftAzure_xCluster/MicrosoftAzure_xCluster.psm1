@@ -100,7 +100,7 @@ function Set-TargetResource
 
             $subnetMask=(Get-ClusterNetwork)[0].AddressMask
 
-            $clusterResourceDependencyExpr = "([$($firstClusterIpv4AddrRes.Name)])"
+            $clusterResourceDependencyExpr = "[$($firstClusterIpv4AddrRes.Name)]"
 
             for ($count=1; $count -le $ClusterIPAddresses.Length - 1; $count++) {
                 
@@ -116,10 +116,8 @@ function Set-TargetResource
                                         "SubnetMask" = $subnetMask
                                         "EnableDhcp" = 0
                                     }
-
-                $newClusterIpv4AddrRes | Start-ClusterResource
-                
-                $clusterResourceDependencyExpr += " or ([$newClusterIpv4AddrResName])"
+              
+                $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
 
             }
 
