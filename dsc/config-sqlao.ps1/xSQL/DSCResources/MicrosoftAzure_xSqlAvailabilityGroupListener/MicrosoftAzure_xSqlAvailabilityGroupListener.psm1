@@ -107,7 +107,7 @@ function Set-TargetResource
                                     "EnableDhcp" = 0
                                 }
             $newIpv4AddrRes | Start-ClusterResource       
-            $clusterResourceDependencyExpr += " and ([$newIpv4AddrResName])"
+            $clusterResourceDependencyExpr += " or ([$newIpv4AddrResName])"
         }
         
         Set-ClusterResourceDependency -Resource "$($AvailabilityGroupName)_$Name" -Dependency $clusterResourceDependencyExpr

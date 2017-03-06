@@ -119,7 +119,7 @@ function Set-TargetResource
 
                 $newClusterIpv4AddrRes | Start-ClusterResource
                 
-                $clusterResourceDependencyExpr += " and ([$newClusterIpv4AddrResName])"
+                $clusterResourceDependencyExpr += " or ([$newClusterIpv4AddrResName])"
 
             }
 
