@@ -100,6 +100,7 @@ function Set-TargetResource
             $newIpv4AddrResName = "$($AvailabilityGroupName)_$($ListenerIPAddresses[$count])"
             Add-ClusterResource -Name $newIpv4AddrResName -Group $AvailabilityGroupName -ResourceType "IP Address" 
             $newIpv4AddrRes = Get-ClusterResource -Name $newIpv4AddrResName
+            Start-Sleep -Seconds 5
             $newIpv4AddrRes |
             Set-ClusterParameter -Multiple @{
                                     "Address" = $ListenerIPAddresses[$count]

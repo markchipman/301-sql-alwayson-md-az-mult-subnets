@@ -106,9 +106,15 @@ function Set-TargetResource
                 
                 $newClusterIpv4AddrResName = "Cluster IP Address $($ClusterIPAddresses[$count])"
 
+                Write-Verbose -Message "Adding $newClusterIpv4AddrRes ..."
+
                 Add-ClusterResource -Name $newClusterIpv4AddrResName -Group "Cluster Group" -ResourceType "IP Address" 
 
                 $newClusterIpv4AddrRes = Get-ClusterResource -Name $newClusterIpv4AddrResName
+
+                Write-Verbose -Message "Updating properties for $newClusterIpv4AddrRes ..."
+
+                Start-Sleep -Seconds 5
 
                 $newClusterIpv4AddrRes |
                 Set-ClusterParameter -Multiple @{
@@ -120,6 +126,8 @@ function Set-TargetResource
                 $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
 
             }
+
+            Write-Verbose -Message "Setting dependency on Cluster Name resource for IP Addresses ..."
 
             Set-ClusterResourceDependency -Resource "Cluster Name" -Dependency $clusterResourceDependencyExpr
 
