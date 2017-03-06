@@ -96,26 +96,11 @@ function Set-TargetResource
         $aglIpAddresses = @()
         $aglIpAddresses += "$($ListenerIPAddresses[0])/$subnetMask"
         
-        $clusterResourceDependencyExpr = "[$($AvailabilityGroupName)_$($ListenerIPAddresses[0])]"
-        
         for ($count=1; $count -le $ListenerIPAddresses.Length - 1; $count++) {
             $subnetMask=(Get-ClusterNetwork)[$($count % 3)].AddressMask
-            $newIpv4AddrResName = "$($AvailabilityGroupName)_$($ListenerIPAddresses[$count])"
-            Add-ClusterResource -Name $newIpv4AddrResName -Group $AvailabilityGroupName -ResourceType "IP Address" 
-            $newIpv4AddrRes = Get-ClusterResource -Name $newIpv4AddrResName
-            Start-Sleep -Seconds 5
-            $newIpv4AddrRes |
-            Set-ClusterParameter -Multiple @{
-                                    "Address" = $ListenerIPAddresses[$count]
-                                    "SubnetMask" = $subnetMask
-                                    "EnableDhcp" = 0
-                                }
-            $clusterResourceDependencyExpr += " or [$newIpv4AddrResName]"
             $aglIpAddresses += "$($ListenerIPAddresses[$count])/$subnetMask"
         }
         
-        Set-ClusterResourceDependency -Resource "$($AvailabilityGroupName)_$Name" -Dependency $clusterResourceDependencyExpr
-
         $ag | New-SqlAvailabilityGroupListener -Name $Name -StaticIp $aglIpAddresses -Port $ListenerPortNumber
     }
     finally
