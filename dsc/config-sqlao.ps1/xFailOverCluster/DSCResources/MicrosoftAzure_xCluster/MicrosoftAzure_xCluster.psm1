@@ -84,55 +84,9 @@ function Set-TargetResource
         { 
             $cluster = CreateFailoverCluster -ClusterName $Name -StaticAddress $ClusterIPAddresses[0]
 
-            Sleep 5
-
-            $clusterGroup = $cluster | Get-ClusterGroup
-
-            $clusterIpAddrRes = $clusterGroup | Get-ClusterResource | Where-Object { $_.ResourceType.Name -in "IP Address", "IPv6 Address", "IPv6 Tunnel Address" }
-
-            Write-Verbose -Message "Removing all Cluster IP Address resources except the first IPv4 Address ..."
-            
-            $firstClusterIpv4AddrRes = $clusterIpAddrRes | Where-Object { $_.ResourceType.Name -eq "IP Address" } | Select-Object -First 1
-            
-            $clusterIpAddrRes | Where-Object { $_.Name -ne $firstClusterIpv4AddrRes.Name } | Remove-ClusterResource -Force | Out-Null
-
-            Write-Verbose -Message "Adding new Cluster IP Address resources ..."
-
-            $subnetMask=(Get-ClusterNetwork)[0].AddressMask
-
-            $clusterResourceDependencyExpr = "[$($firstClusterIpv4AddrRes.Name)]"
-
-            for ($count=1; $count -le $ClusterIPAddresses.Length - 1; $count++) {
-                
-                $newClusterIpv4AddrResName = "Cluster IP Address $($ClusterIPAddresses[$count])"
-
-                Write-Verbose -Message "Adding $newClusterIpv4AddrRes ..."
-
-                Add-ClusterResource -Name $newClusterIpv4AddrResName -Group "Cluster Group" -ResourceType "IP Address" 
-
-                $newClusterIpv4AddrRes = Get-ClusterResource -Name $newClusterIpv4AddrResName
-
-                Write-Verbose -Message "Updating properties for $newClusterIpv4AddrRes ..."
-
-                Start-Sleep -Seconds 5
-
-                $newClusterIpv4AddrRes |
-                Set-ClusterParameter -Multiple @{
-                                        "Address" = $ClusterIPAddresses[$count]
-                                        "SubnetMask" = $subnetMask
-                                        "EnableDhcp" = 0
-                                    }
-              
-                $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
-
-            }
-
-            Write-Verbose -Message "Setting dependency on Cluster Name resource for IP Addresses ..."
-
-            Set-ClusterResourceDependency -Resource "Cluster Name" -Dependency $clusterResourceDependencyExpr
-
-            (Get-Cluster).SameSubnetThreshold = 20
         }
+
+        Start-Sleep -Seconds 5    
 
         $nostorage=$true
         
@@ -164,6 +118,56 @@ function Set-TargetResource
 
             AddNodeToCluster -ClusterName $Name -NodeName $node -Nostorage $nostorage
         }
+
+        Start-Sleep -Seconds 5
+
+        $clusterGroup = $cluster | Get-ClusterGroup
+
+        $clusterIpAddrRes = $clusterGroup | Get-ClusterResource | Where-Object { $_.ResourceType.Name -in "IP Address", "IPv6 Address", "IPv6 Tunnel Address" }
+
+        Write-Verbose -Message "Removing all Cluster IP Address resources except the first IPv4 Address ..."
+        
+        $firstClusterIpv4AddrRes = $clusterIpAddrRes | Where-Object { $_.ResourceType.Name -eq "IP Address" } | Select-Object -First 1
+        
+        $clusterIpAddrRes | Where-Object { $_.Name -ne $firstClusterIpv4AddrRes.Name } | Remove-ClusterResource -Force | Out-Null
+
+        Write-Verbose -Message "Adding new Cluster IP Address resources ..."
+
+        $clusterResourceDependencyExpr = "[$($firstClusterIpv4AddrRes.Name)]"
+
+        for ($count=1; $count -le $ClusterIPAddresses.Length - 1; $count++) {
+
+            $subnetMask=(Get-ClusterNetwork)[$($count % 3)].AddressMask
+            
+            $newClusterIpv4AddrResName = "Cluster IP Address $($ClusterIPAddresses[$count])"
+
+            Write-Verbose -Message "Adding $newClusterIpv4AddrRes ..."
+
+            Add-ClusterResource -Name $newClusterIpv4AddrResName -Group "Cluster Group" -ResourceType "IP Address" 
+
+            $newClusterIpv4AddrRes = Get-ClusterResource -Name $newClusterIpv4AddrResName
+
+            Write-Verbose -Message "Updating properties for $newClusterIpv4AddrRes ..."
+
+            Start-Sleep -Seconds 5
+
+            $newClusterIpv4AddrRes |
+            Set-ClusterParameter -Multiple @{
+                                    "Address" = $ClusterIPAddresses[$count]
+                                    "SubnetMask" = $subnetMask
+                                    "EnableDhcp" = 0
+                                }
+            
+            $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
+
+        }
+
+        Write-Verbose -Message "Setting dependency on Cluster Name resource for IP Addresses ..."
+
+        Set-ClusterResourceDependency -Resource "Cluster Name" -Dependency $clusterResourceDependencyExpr
+
+        (Get-Cluster).SameSubnetThreshold = 20
+        
     }
     finally
     {

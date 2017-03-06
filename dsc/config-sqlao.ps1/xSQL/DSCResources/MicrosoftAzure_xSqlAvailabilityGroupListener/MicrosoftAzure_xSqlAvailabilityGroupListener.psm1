@@ -95,8 +95,10 @@ function Set-TargetResource
         $subnetMask=(Get-ClusterNetwork)[0].AddressMask
         $ag | New-SqlAvailabilityGroupListener -Name $Name -StaticIp "$($ListenerIPAddresses[0])/$subnetMask" -Port $ListenerPortNumber
         $clusterResourceDependencyExpr = "[$($AvailabilityGroupName)_$($ListenerIPAddresses[0])]"
+        $aglPath = "SQLSERVER:\SQL\PrimaryServer\InstanceName\AvailabilityGroups\MainAG\AvailabilityGroupListeners\$Name"
 
         for ($count=1; $count -le $ListenerIPAddresses.Length - 1; $count++) {
+            $subnetMask=(Get-ClusterNetwork)[$($count % 3)].AddressMask
             $newIpv4AddrResName = "$($AvailabilityGroupName)_$($ListenerIPAddresses[$count])"
             Add-ClusterResource -Name $newIpv4AddrResName -Group $AvailabilityGroupName -ResourceType "IP Address" 
             $newIpv4AddrRes = Get-ClusterResource -Name $newIpv4AddrResName
@@ -107,6 +109,7 @@ function Set-TargetResource
                                     "SubnetMask" = $subnetMask
                                     "EnableDhcp" = 0
                                 }
+            Add-SqlAvailabilityGroupListenerStaticIp -Path $aglPath -StaticIp "$($ListenerIPAddresses[$count])/$subnetMask"
             $clusterResourceDependencyExpr += " or [$newIpv4AddrResName]"
         }
         
