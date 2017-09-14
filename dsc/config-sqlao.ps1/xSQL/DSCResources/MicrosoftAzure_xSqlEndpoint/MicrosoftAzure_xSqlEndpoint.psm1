@@ -79,7 +79,7 @@ function Set-TargetResource
             # TODO: use Microsoft.SqlServer.Management.Smo.Endpoint instead of
             #   SqlPs since the PS cmdlets don't support impersonation.
             Write-Verbose -Message "Creating database mirroring endpoint for SQL AlwaysOn ..."
-            $endpoint = $s | New-SqlHadrEndpoint -Name $Name -Port $PortNumber
+            $endpoint = New-SqlHadrEndpoint -Name $Name -Port $PortNumber -Path SQLSERVER:\SQL\$env:COMPUTERNAME\DEFAULT
             $endpoint | Set-SqlHadrEndpoint -State 'Started'
         }
     }

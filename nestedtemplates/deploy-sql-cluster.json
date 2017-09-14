@@ -144,7 +144,7 @@
             "name": "[concat(variables('vmNamePrefix'), copyindex(), '-nic')]",
             "type": "Microsoft.Network/networkInterfaces",
             "location": "[resourceGroup().location]",
-            "apiVersion": "2016-10-01",
+            "apiVersion": "2017-08-01",
             "copy": {
                 "name": "nicLoop",
                 "count": "[parameters('vmCount')]"
@@ -336,7 +336,7 @@
         {
             "type": "Microsoft.Compute/virtualMachines/extensions",
             "name": "[concat(variables('vmNamePrefix'),copyindex(1),'/sqlPrep')]",
-            "apiVersion": "2015-06-15",
+            "apiVersion": "2017-03-30",
             "location": "[resourceGroup().location]",
             "dependsOn": [
                 "virtualMachineLoop"
@@ -378,7 +378,7 @@
         {
             "type": "Microsoft.Compute/virtualMachines/extensions",
             "name": "[concat(variables('vmNamePrefix'),'0/sqlConfig')]",
-            "apiVersion": "2015-06-15",
+            "apiVersion": "2017-03-30",
             "location": "[resourceGroup().location]",
             "dependsOn": [
                 "virtualMachineLoop",

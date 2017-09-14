@@ -47,39 +47,11 @@
     },
     "resources": [
         {
-            "type": "Microsoft.Resources/deployments",
-            "apiVersion": "2015-01-01",
-            "name": "[concat(parameters('vmName'),'-diskSelection')]",
-            "properties": {
-                "mode": "Incremental",
-                "templateLink": {
-                    "uri": "[variables('diskSelectionTemplateUri')]"
-                },
-                "parameters": {
-                    "vmDiskCount": {
-                        "value": "[parameters('vmDiskCount')]"
-                    },
-                    "vmDiskSize": {
-                        "value": "[parameters('vmDiskSize')]"
-                    },
-                    "diskCaching": {
-                        "value": "None"
-                    },
-                    "diskNamingPrefix": {
-                        "value": "[concat(parameters('vmName'), '-data')]"
-                    }
-                }
-            }
-        },
-        {
             "type": "Microsoft.Compute/virtualMachines",
-            "apiVersion": "2016-04-30-preview",
+            "apiVersion": "2017-03-30",
             "location": "[resourceGroup().location]",
             "name": "[parameters('vmName')]",
             "zones": "[parameters('zones')]",
-            "dependsOn": [
-                "[concat('Microsoft.Resources/deployments/',parameters('vmName'),'-diskSelection')]"
-            ],
             "properties": {
                 "hardwareProfile": {
                     "vmSize": "[parameters('vmSize')]"
@@ -101,7 +73,17 @@
                         "caching": "ReadWrite",
                         "createOption": "FromImage"
                     },
-                    "dataDisks": "[reference(concat(parameters('vmName'),'-diskSelection')).outputs.dataDiskArray.value]"
+                    "copy": [
+                        {
+                            "name": "dataDisks",
+                            "count": "[parameters('vmDiskCount')]",
+                            "input": {
+                                "diskSizeGB": "[parameters('vmDiskSize')]",
+                                "lun": "[copyIndex('dataDisks')]",
+                                "createOption": "Empty"
+                            }
+                        }
+                    ]
                 },
                 "networkProfile": {
                     "networkInterfaces": [

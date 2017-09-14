@@ -259,6 +259,7 @@ configuration ConfigSQLAO
             PortNumber = $DatabaseMirrorPort
             AllowedUser = $SQLServiceCreds.UserName
             SqlAdministratorCredential = $SQLCreds
+            PsDscRunAsCredential = $DomainCreds
             DependsOn = "[xSqlServer]ConfigureSqlServerWithAlwaysOn"
         }
 
