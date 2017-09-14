@@ -119,6 +119,7 @@ configuration ConfigSQLAO
         {
             Name = "RSAT-Clustering-PowerShell"
             Ensure = "Present"
+            DependsOn = "[WindowsFeature]FC"
         }
 
         WindowsFeature ADPS
@@ -223,9 +224,10 @@ configuration ConfigSQLAO
         {
             Name = $ClusterName
             DomainAdministratorCredential = $DomainCreds
+            PsDscRunAsCredential = $DomainCreds
             Nodes = $Nodes
             ClusterIPAddresses = $ClusterIpAddresses
-            DependsOn = "[xComputer]DomainJoin"
+            DependsOn = @("[WindowsFeature]FCPS","[xComputer]DomainJoin")
         }
 
         Script CloudWitness

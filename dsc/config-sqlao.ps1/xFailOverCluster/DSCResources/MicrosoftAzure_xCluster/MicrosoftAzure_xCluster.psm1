@@ -20,35 +20,18 @@ function Get-TargetResource
         [string[]] $ClusterIPAddresses
     )
 
-    $ComputerInfo = Get-WmiObject Win32_ComputerSystem
-    if (($ComputerInfo -eq $null) -or ($ComputerInfo.Domain -eq $null))
-    {
-        throw "Can't find machine's domain name."
-    }
+    $cluster = Get-Cluster -Name . -ErrorAction SilentlyContinue
     
-    try
+    if ($null -eq $cluster)
     {
-        ($oldToken, $context, $newToken) = ImpersonateAs -cred $DomainAdministratorCredential
-        $cluster = Get-Cluster -Name $Name -Domain $ComputerInfo.Domain
-        if ($null -eq $cluster)
-        {
-            throw "Can't find the cluster '$($Name)'."
-        }
-
-        $allNodes = @()
-        foreach ($node in ($cluster | Get-ClusterNode))
-        {
-            $allNodes += $node.Name
-        }
+        throw "Can't find the cluster '$($Name)'."
     }
-    finally
+
+    $allNodes = @()
+
+    foreach ($node in ($cluster | Get-ClusterNode -ErrorAction SilentlyContinue))
     {
-        if ($context)
-        {
-            $context.Undo()
-            $context.Dispose()
-            CloseUserToken($newToken)
-        }
+        $allNodes += $node.Name
     }
 
     $retvalue = @{
@@ -76,108 +59,111 @@ function Set-TargetResource
 
     $bCreate = $true
 
-    try
+    if ($bCreate)
+    { 
+        $cluster = CreateFailoverCluster -ClusterName $Name -StaticAddress $ClusterIPAddresses[0]
+    }
+
+    Start-Sleep -Seconds 5    
+
+    $nostorage=$true
+        
+    Write-Verbose -Message "Adding specified nodes to cluster '$($Name)' ..."
+        
+    #Add Nodes to cluster
+
+    $allNodes = @()
+    
+    While (!$allNodes) {
+
+        Start-Sleep -Seconds 30
+
+        Write-Verbose -Message "Finding nodes in cluster '$($Name)' ..."
+
+        $allNodes = Get-ClusterNode -Cluster $Name -ErrorAction SilentlyContinue
+
+    }
+
+    Write-Verbose -Message "Existing nodes found in cluster '$($Name)' are: $($allNodes) ..."
+    
+    Write-Verbose -Message "Adding specified nodes to cluster '$($Name)' ..."
+
+    foreach ($node in $Nodes)
     {
-        ($oldToken, $context, $newToken) = ImpersonateAs -cred $DomainAdministratorCredential
+        $foundNode = $allNodes | where-object { $_.Name -eq $node }
 
-        if ($bCreate)
-        { 
-            $cluster = CreateFailoverCluster -ClusterName $Name -StaticAddress $ClusterIPAddresses[0]
-
-        }
-
-        Start-Sleep -Seconds 5    
-
-        $nostorage=$true
-        
-        Write-Verbose -Message "Adding specified nodes to cluster '$($Name)' ..."
-        
-        #Add Nodes to cluster
-        $allNodes = Get-ClusterNode -Cluster $Name
-        
-        foreach ($node in $Nodes)
+        if ($foundNode -and ($foundNode.State -ne "Up"))
         {
-            $foundNode = $allNodes | where-object { $_.Name -eq $node }
-
-            if ($foundNode -and ($foundNode.State -ne "Up"))
-            {
-                Write-Verbose -Message "Removing node '$($node)' since it's in the cluster but is not UP ..."
-                
-                Remove-ClusterNode $foundNode -Cluster $Name -Force | Out-Null
-
-                AddNodeToCluster -ClusterName $Name -NodeName $node -Nostorage $nostorage
-
-                continue
-            }
-            elseif ($foundNode)
-            {
-                Write-Verbose -Message "Node $($node)' already in the cluster, skipping ..."
-
-                continue
-            }
+            Write-Verbose -Message "Removing node '$($node)' since it's in the cluster but is not UP ..."
+            
+            Remove-ClusterNode $foundNode -Cluster $Name -Force | Out-Null
 
             AddNodeToCluster -ClusterName $Name -NodeName $node -Nostorage $nostorage
+
+            continue
         }
+        elseif ($foundNode)
+        {
+            Write-Verbose -Message "Node '$($node)' already in the cluster, skipping ..."
+
+            continue
+        }
+
+        AddNodeToCluster -ClusterName $Name -NodeName $node -Nostorage $nostorage
+
+    }
+   
+    # Set Cluster IP Addresses
+
+    Start-Sleep -Seconds 5
+
+    $clusterGroup = $cluster | Get-ClusterGroup
+
+    $clusterIpAddrRes = $clusterGroup | Get-ClusterResource | Where-Object { $_.ResourceType.Name -in "IP Address", "IPv6 Address", "IPv6 Tunnel Address" }
+
+    Write-Verbose -Message "Removing all Cluster IP Address resources except the first IPv4 Address ..."
+    
+    $firstClusterIpv4AddrRes = $clusterIpAddrRes | Where-Object { $_.ResourceType.Name -eq "IP Address" } | Select-Object -First 1
+    
+    $clusterIpAddrRes | Where-Object { $_.Name -ne $firstClusterIpv4AddrRes.Name } | Remove-ClusterResource -Force | Out-Null
+
+    Write-Verbose -Message "Adding new Cluster IP Address resources ..."
+
+    $clusterResourceDependencyExpr = "[$($firstClusterIpv4AddrRes.Name)]"
+
+    for ($count=1; $count -le $ClusterIPAddresses.Length - 1; $count++) {
+
+        $subnetMask=(Get-ClusterNetwork)[$($count % 3)].AddressMask
+        
+        $newClusterIpv4AddrResName = "Cluster IP Address $($ClusterIPAddresses[$count])"
+
+        Write-Verbose -Message "Adding $newClusterIpv4AddrRes ..."
+
+        Add-ClusterResource -Name $newClusterIpv4AddrResName -Group "Cluster Group" -ResourceType "IP Address" 
+
+        $newClusterIpv4AddrRes = Get-ClusterResource -Name $newClusterIpv4AddrResName
+
+        Write-Verbose -Message "Updating properties for $newClusterIpv4AddrRes ..."
 
         Start-Sleep -Seconds 5
 
-        $clusterGroup = $cluster | Get-ClusterGroup
-
-        $clusterIpAddrRes = $clusterGroup | Get-ClusterResource | Where-Object { $_.ResourceType.Name -in "IP Address", "IPv6 Address", "IPv6 Tunnel Address" }
-
-        Write-Verbose -Message "Removing all Cluster IP Address resources except the first IPv4 Address ..."
+        $newClusterIpv4AddrRes |
+        Set-ClusterParameter -Multiple @{
+                                "Address" = $ClusterIPAddresses[$count]
+                                "SubnetMask" = $subnetMask
+                                "EnableDhcp" = 0
+                            }
         
-        $firstClusterIpv4AddrRes = $clusterIpAddrRes | Where-Object { $_.ResourceType.Name -eq "IP Address" } | Select-Object -First 1
-        
-        $clusterIpAddrRes | Where-Object { $_.Name -ne $firstClusterIpv4AddrRes.Name } | Remove-ClusterResource -Force | Out-Null
+        $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
 
-        Write-Verbose -Message "Adding new Cluster IP Address resources ..."
-
-        $clusterResourceDependencyExpr = "[$($firstClusterIpv4AddrRes.Name)]"
-
-        for ($count=1; $count -le $ClusterIPAddresses.Length - 1; $count++) {
-
-            $subnetMask=(Get-ClusterNetwork)[$($count % 3)].AddressMask
-            
-            $newClusterIpv4AddrResName = "Cluster IP Address $($ClusterIPAddresses[$count])"
-
-            Write-Verbose -Message "Adding $newClusterIpv4AddrRes ..."
-
-            Add-ClusterResource -Name $newClusterIpv4AddrResName -Group "Cluster Group" -ResourceType "IP Address" 
-
-            $newClusterIpv4AddrRes = Get-ClusterResource -Name $newClusterIpv4AddrResName
-
-            Write-Verbose -Message "Updating properties for $newClusterIpv4AddrRes ..."
-
-            Start-Sleep -Seconds 5
-
-            $newClusterIpv4AddrRes |
-            Set-ClusterParameter -Multiple @{
-                                    "Address" = $ClusterIPAddresses[$count]
-                                    "SubnetMask" = $subnetMask
-                                    "EnableDhcp" = 0
-                                }
-            
-            $clusterResourceDependencyExpr += " or [$newClusterIpv4AddrResName]"
-
-        }
-
-        Write-Verbose -Message "Setting dependency on Cluster Name resource for IP Addresses ..."
-
-        Set-ClusterResourceDependency -Resource "Cluster Name" -Dependency $clusterResourceDependencyExpr
-
-        (Get-Cluster).SameSubnetThreshold = 20
-        
     }
-    finally
-    {
-        if ($context)
-        {
-            $context.Undo()
-            $context.Dispose()
-            CloseUserToken($newToken)
-        }
-    }
+
+    # Set Cluster Resource Dependencies
+
+    Write-Verbose -Message "Setting dependency on Cluster Name resource for IP Addresses ..."
+
+    Set-ClusterResourceDependency -Resource "Cluster Name" -Dependency $clusterResourceDependencyExpr
+    
 }
 
 #
@@ -205,81 +191,70 @@ function Test-TargetResource
     )
 
     $bRet = $false
-
+    
     Write-Verbose -Message "Checking if cluster '$($Name)' is present ..."
     try
-    {
-
-        $ComputerInfo = Get-WmiObject Win32_ComputerSystem
-        if (($ComputerInfo -eq $null) -or ($ComputerInfo.Domain -eq $null))
         {
-            Write-Verbose -Message "Can't find machine's domain name."
-            $bRet = $false
-        }
-        else
-        {
-            try
+            $cluster = Get-Cluster -Name . -ErrorAction SilentlyContinue
+            
+            if ($cluster)
             {
-                ($oldToken, $context, $newToken) = ImpersonateAs -cred $DomainAdministratorCredential
-
-                $cluster = Get-Cluster -Name $Name -Domain $ComputerInfo.Domain
                 Write-Verbose -Message "Cluster $($Name)' is present."
+                Write-Verbose -Message "Checking if the expected nodes are in cluster $($Name)' ..."
 
-                if ($cluster)
+                $allNodes = @()
+
+                While (!$allNodes) {
+
+                    Start-Sleep -Seconds 30
+
+                    Write-Verbose -Message "Finding nodes in cluster '$($Name)' ..."
+
+                    $allNodes = Get-ClusterNode -Cluster . -ErrorAction SilentlyContinue
+
+                }
+
+                Write-Verbose -Message "Existing nodes found in cluster '$($Name)' are: $($allNodes) ..."
+
+                $bRet = $true
+                foreach ($node in $Nodes)
                 {
-                    Write-Verbose -Message "Checking if the expected nodes are in cluster $($Name)' ..."
-                    $allNodes = Get-ClusterNode -Cluster $Name
-                    $bRet = $true
-                    foreach ($node in $Nodes)
-                    {
-                        $foundNode = $allNodes | where-object { $_.Name -eq $node }
+                    $foundNode = $allNodes | where-object { $_.Name -eq $node }
 
-                        if (!$foundNode)
-                        {
-                            Write-Verbose -Message "Node '$($node)' NOT found in the cluster."
-                            $bRet = $bRet -and $false
-                        }
-                        elseif ($foundNode.State -ne "Up")
-                        {
-                            Write-Verbose -Message "Node '$($node)' found in the cluster, but is not UP."
-                            $bRet = $bRet -and $false
-                        }
-                        else
-                        {
-                            Write-Verbose -Message "Node '$($node)' found in the cluster."
-                            $bRet = $bRet -and $true
-                        }
+                    if (!$foundNode)
+                    {
+                        Write-Verbose -Message "Node '$($node)' NOT found in the cluster."
+                        $bRet = $bRet -and $false
                     }
-
-                    if ($bRet)
+                    elseif ($foundNode.State -ne "Up")
                     {
-                        Write-Verbose -Message "All expected nodes found in cluster $($Name)."
+                        Write-Verbose -Message "Node '$($node)' found in the cluster, but is not UP."
+                        $bRet = $bRet -and $false
                     }
                     else
                     {
-                        Write-Verbose -Message "At least one node is missing from cluster $($Name)."
+                        Write-Verbose -Message "Node '$($node)' found in the cluster."
+                        $bRet = $bRet -and $true
                     }
                 }
-            }
-            finally
-            {    
-                if ($context)
-                {
-                    $context.Undo()
-                    $context.Dispose()
 
-                    CloseUserToken($newToken)
+                if ($bRet)
+                {
+                    Write-Verbose -Message "All expected nodes found in cluster $($Name)."
+                }
+                else
+                {
+                    Write-Verbose -Message "At least one node is missing from cluster $($Name)."
                 }
             }
         }
-    }
-    catch
-    {
-        Write-Verbose -Message "Error testing cluster $($Name)."
-        throw $_
-    }
+        catch
+        {
+            Write-Verbose -Message "Error testing cluster $($Name)."
+            throw $_
+        }
 
-    $bRet
+        $bRet
 }
 
 function AddNodeToCluster
@@ -391,57 +366,5 @@ function CreateFailoverCluster
         }
     }
 }
-
-function Get-ImpersonateLib
-{
-    if ($script:ImpersonateLib)
-    {
-        return $script:ImpersonateLib
-    }
-
-    $sig = @'
-[DllImport("advapi32.dll", SetLastError = true)]
-public static extern bool LogonUser(string lpszUsername, string lpszDomain, string lpszPassword, int dwLogonType, int dwLogonProvider, ref IntPtr phToken);
-
-[DllImport("kernel32.dll")]
-public static extern Boolean CloseHandle(IntPtr hObject);
-'@
-   $script:ImpersonateLib = Add-Type -PassThru -Namespace 'Lib.Impersonation' -Name ImpersonationLib -MemberDefinition $sig
-
-   return $script:ImpersonateLib
-}
-
-function ImpersonateAs([PSCredential] $cred)
-{
-    [IntPtr] $userToken = [Security.Principal.WindowsIdentity]::GetCurrent().Token
-    $userToken
-    $ImpersonateLib = Get-ImpersonateLib
-
-    $bLogin = $ImpersonateLib::LogonUser($cred.GetNetworkCredential().UserName, $cred.GetNetworkCredential().Domain, $cred.GetNetworkCredential().Password, 
-    9, 0, [ref]$userToken)
-
-    if ($bLogin)
-    {
-        $Identity = New-Object Security.Principal.WindowsIdentity $userToken
-        $context = $Identity.Impersonate()
-    }
-    else
-    {
-        throw "Can't log on as user '$($cred.GetNetworkCredential().UserName)'."
-    }
-    $context, $userToken
-}
-
-function CloseUserToken([IntPtr] $token)
-{
-    $ImpersonateLib = Get-ImpersonateLib
-
-    $bLogin = $ImpersonateLib::CloseHandle($token)
-    if (!$bLogin)
-    {
-        throw "Can't close token."
-    }
-}
-
 
 Export-ModuleMember -Function *-TargetResource
